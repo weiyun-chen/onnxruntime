@@ -61,3 +61,8 @@ the disposable hosted runners to make room for the CUDA images and build tree.
 The Windows build downloads NVIDIA's cuDNN 9.8.0.87 CUDA 12 developer archive
 and verifies its SHA-256 before use. The PyPI Windows runtime wheel is not used
 because it does not contain the `cudnn.lib` import library required by CMake.
+
+The Linux job enables an 8 GiB swap file because linking a CUDA provider
+containing all seven native architectures plus SM120 PTX can exceed the physical
+memory of a standard GitHub-hosted runner. Unit-test targets are disabled on
+both platforms because they are not part of the release assets.

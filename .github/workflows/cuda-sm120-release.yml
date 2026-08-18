@@ -133,6 +133,7 @@ jobs:
             --cudnn_home "$env:CUDNN_PATH" `
             --cmake_extra_defines `
               "CMAKE_CUDA_ARCHITECTURES=61-real;75-real;86-real;89-real;120-real;120-virtual" `
+              "onnxruntime_BUILD_UNIT_TESTS=OFF" `
               "onnxruntime_USE_FPA_INTB_GEMM=OFF"
           if ($LASTEXITCODE -ne 0) {
             Get-ChildItem build\Windows -Recurse -File -ErrorAction SilentlyContinue |
@@ -194,6 +195,11 @@ jobs:
         shell: bash
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo fallocate -l 8G /mnt/ort-build.swap
+          sudo chmod 600 /mnt/ort-build.swap
+          sudo mkswap /mnt/ort-build.swap
+          sudo swapon /mnt/ort-build.swap
+          free -h
           df -h /
 
       - uses: actions/checkout@v5

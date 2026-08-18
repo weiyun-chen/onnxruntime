@@ -17,7 +17,7 @@ apt-get install --yes --no-install-recommends \
   build-essential ca-certificates git python3 python3-pip zip
 rm -rf /var/lib/apt/lists/*
 python3 -m pip install --no-cache-dir \
-  cmake==3.31.6 ninja==1.11.1.3 packaging==24.2
+  cmake==3.31.6 ninja==1.11.1.3 packaging==24.2 psutil
 
 python3 "${SOURCE_DIR}/tools/ci_build/build.py" \
   --allow_running_as_root \
@@ -36,6 +36,7 @@ python3 "${SOURCE_DIR}/tools/ci_build/build.py" \
   --cudnn_home /usr \
   --cmake_extra_defines \
     "CMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES}" \
+    "onnxruntime_BUILD_UNIT_TESTS=OFF" \
     "onnxruntime_USE_FPA_INTB_GEMM=OFF"
 
 PROVIDER_LIBRARY="${BUILD_DIR}/Release/libonnxruntime_providers_cuda.so"

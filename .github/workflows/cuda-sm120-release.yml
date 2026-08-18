@@ -42,7 +42,7 @@ jobs:
         with:
           cuda: '12.8.1'
           method: network
-          sub-packages: '["nvcc", "cudart", "cudart_dev", "cuobjdump", "nvfatbin", "nvjitlink", "nvrtc", "nvrtc_dev", "thrust", "cublas", "cublas_dev", "cufft", "cufft_dev", "curand", "curand_dev", "cusparse", "cusparse_dev", "visual_studio_integration"]'
+          sub-packages: '["nvcc", "cudart", "cuobjdump", "nvfatbin", "nvjitlink", "nvrtc", "nvrtc_dev", "thrust", "cublas", "cublas_dev", "cufft", "cufft_dev", "curand", "curand_dev", "cusparse", "cusparse_dev", "visual_studio_integration"]'
 
       - name: Install build dependencies and cuDNN
         shell: pwsh

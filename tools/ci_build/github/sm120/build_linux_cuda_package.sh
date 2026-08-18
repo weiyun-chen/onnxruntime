@@ -56,7 +56,7 @@ for sm in ${EXPECTED_SMS}; do
 done
 PTX_LIST="$(cuobjdump --list-ptx "${PROVIDER_LIB}" 2>&1 || true)"
 echo "${PTX_LIST}"
-if ! echo "${PTX_LIST}" | grep -q "PTX"; then
+if ! echo "${PTX_LIST}" | grep -q "compute_120"; then
     echo "ERROR: ${PROVIDER_LIB} does not contain compute_120 PTX" >&2
     exit 1
 fi

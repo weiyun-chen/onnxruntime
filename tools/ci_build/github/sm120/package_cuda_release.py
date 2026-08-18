@@ -99,18 +99,19 @@ def main() -> None:
     version = version_file.read_text().strip() if version_file.exists() else "unknown"
 
     # Manifest
+    file_hashes: dict[str, str] = {}
+    for f in sorted(staging.rglob("*")):
+        if f.is_file():
+            rel = f.relative_to(staging).as_posix()
+            file_hashes[rel] = _sha256(f)
+
     manifest = {
         "version": version,
         "commit": args.commit,
         "platform": args.platform,
         "package": args.package_name,
-        "files": {},
+        "files": file_hashes,
     }
-    for f in sorted(staging.rglob("*")):
-        if f.is_file():
-            rel = f.relative_to(staging).as_posix()
-            manifest["files"][rel] = _sha256(f)
-
     (staging / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
     # Create ZIP

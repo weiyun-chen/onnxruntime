@@ -92,7 +92,7 @@ jobs:
           }
           $ptxEntries = & $cuobjdump --list-ptx $provider 2>&1 | Out-String
           $ptxEntries
-          if ($ptxEntries -notmatch 'PTX') {
+          if ($ptxEntries -notmatch 'compute_120') {
             throw "onnxruntime_providers_cuda.dll does not contain compute_120 PTX"
           }
           cmake --install build\Windows\Release --config Release --prefix install\Windows

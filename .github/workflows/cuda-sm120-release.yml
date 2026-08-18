@@ -42,18 +42,77 @@ jobs:
         with:
           cuda: '12.8.1'
           method: network
-          sub-packages: '["nvcc", "cudart", "cuobjdump", "nvfatbin", "nvjitlink", "nvrtc", "nvrtc_dev", "thrust", "cublas", "cublas_dev", "cufft", "cufft_dev", "curand", "curand_dev", "cusparse", "cusparse_dev", "visual_studio_integration"]'
+          sub-packages: '["nvcc", "cudart", "cudart_dev", "cuobjdump", "nvfatbin", "nvjitlink", "nvrtc", "nvrtc_dev", "thrust", "cublas", "cublas_dev", "cufft", "cufft_dev", "curand", "curand_dev", "cusparse", "cusparse_dev", "visual_studio_integration"]'
 
       - name: Install build dependencies and cuDNN
         shell: pwsh
         run: |
-          python -m pip install --disable-pip-version-check packaging==24.2
-          python -m pip install --disable-pip-version-check --no-deps nvidia-cudnn-cu12==9.8.0.87
-          $cudnnPath = python -c "import pathlib, sysconfig; print(pathlib.Path(sysconfig.get_paths()['platlib']) / 'nvidia' / 'cudnn')"
-          if (-not (Test-Path (Join-Path $cudnnPath "include\cudnn.h"))) {
-            throw "cuDNN headers were not installed below $cudnnPath"
+          python -m pip install --disable-pip-version-check packaging==24.2 psutil
+
+          # The nvidia-cudnn-cu12 Windows wheel contains headers and runtime DLLs,
+          # but not cudnn.lib, which CMake needs while linking the CUDA provider.
+          $cudnnVersion = "9.8.0.87"
+          $cudnnArchiveName = "cudnn-windows-x86_64-${cudnnVersion}_cuda12-archive.zip"
+          $cudnnArchive = Join-Path $env:RUNNER_TEMP $cudnnArchiveName
+          $cudnnExtractDir = Join-Path $env:RUNNER_TEMP "cudnn-9.8.0.87"
+          $cudnnUrl = "https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/windows-x86_64/$cudnnArchiveName"
+          $expectedSha256 = "d8a23705e3884b137b7e05449fb2b61bfa524e7cfc3fda80743d633f423c6ce4"
+
+          curl.exe --fail --location --retry 5 --output $cudnnArchive $cudnnUrl
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to download cuDNN from $cudnnUrl"
+          }
+          $actualSha256 = (Get-FileHash -Path $cudnnArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) {
+            throw "cuDNN archive SHA-256 mismatch: expected $expectedSha256, got $actualSha256"
+          }
+
+          Expand-Archive -Path $cudnnArchive -DestinationPath $cudnnExtractDir -Force
+          Remove-Item -Force $cudnnArchive
+          $cudnnPath = Join-Path $cudnnExtractDir "cudnn-windows-x86_64-${cudnnVersion}_cuda12-archive"
+          $requiredCudnnFiles = @(
+            "include\cudnn.h",
+            "include\cudnn_version.h",
+            "lib\x64\cudnn.lib",
+            "bin\cudnn64_9.dll"
+          )
+          foreach ($relativePath in $requiredCudnnFiles) {
+            $path = Join-Path $cudnnPath $relativePath
+            if (-not (Test-Path $path)) {
+              throw "Required cuDNN development file is missing: $path"
+            }
           }
           "CUDNN_PATH=$cudnnPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify CUDA and cuDNN development files
+        shell: pwsh
+        run: |
+          $cudaPath = "${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+          $requiredFiles = @(
+            "include\cuda_runtime.h",
+            "include\cublas_v2.h",
+            "include\cufft.h",
+            "include\curand.h",
+            "include\cusparse.h",
+            "lib\x64\cudart.lib",
+            "lib\x64\cublas.lib",
+            "lib\x64\cublasLt.lib",
+            "lib\x64\cufft.lib",
+            "lib\x64\curand.lib"
+          )
+          foreach ($relativePath in $requiredFiles) {
+            $path = Join-Path $cudaPath $relativePath
+            if (-not (Test-Path $path)) {
+              throw "Required CUDA development file is missing: $path"
+            }
+          }
+          foreach ($relativePath in @("include\cudnn.h", "lib\x64\cudnn.lib", "bin\cudnn64_9.dll")) {
+            $path = Join-Path $env:CUDNN_PATH $relativePath
+            if (-not (Test-Path $path)) {
+              throw "Required cuDNN development file is missing: $path"
+            }
+          }
+          & (Join-Path $cudaPath "bin\nvcc.exe") --version
 
       - name: Build ONNX Runtime
         shell: pwsh
@@ -75,6 +134,15 @@ jobs:
             --cmake_extra_defines `
               "CMAKE_CUDA_ARCHITECTURES=61-real;75-real;86-real;89-real;120-real;120-virtual" `
               "onnxruntime_USE_FPA_INTB_GEMM=OFF"
+          if ($LASTEXITCODE -ne 0) {
+            Get-ChildItem build\Windows -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -in @("CMakeConfigureLog.yaml", "CMakeError.log", "CMakeOutput.log") } |
+              ForEach-Object {
+                Write-Host "===== $($_.FullName) (last 300 lines) ====="
+                Get-Content $_.FullName -Tail 300
+              }
+            exit $LASTEXITCODE
+          }
 
       - name: Verify CUDA architectures and install
         shell: pwsh

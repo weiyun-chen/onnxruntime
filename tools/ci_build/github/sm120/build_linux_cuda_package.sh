@@ -20,6 +20,7 @@ python3 -m pip install --no-cache-dir \
   cmake==3.31.6 ninja==1.11.1.3 packaging==24.2
 
 python3 "${SOURCE_DIR}/tools/ci_build/build.py" \
+  --allow_running_as_root \
   --update \
   --build \
   --build_dir "${BUILD_DIR}" \

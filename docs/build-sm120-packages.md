@@ -57,3 +57,7 @@ No GPU is required on the runners. `cuobjdump` verifies that the compiled CUDA
 provider contains the requested architecture before packaging succeeds. The
 workflow removes unused Android, .NET, GHC, and CodeQL installations only from
 the disposable hosted runners to make room for the CUDA images and build tree.
+
+The Windows build downloads NVIDIA's cuDNN 9.8.0.87 CUDA 12 developer archive
+and verifies its SHA-256 before use. The PyPI Windows runtime wheel is not used
+because it does not contain the `cudnn.lib` import library required by CMake.

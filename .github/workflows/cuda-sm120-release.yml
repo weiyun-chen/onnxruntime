@@ -1,0 +1,181 @@
+name: CUDA 12.8 release packages with SM120
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*-sm120*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-x64-cuda128:
+    name: Windows x64 / CUDA 12.8 / SM120
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - name: Free disk space for CUDA and the build tree
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force "C:\Android" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\hostedtoolcache\windows\CodeQL" -ErrorAction SilentlyContinue
+          Get-PSDrive C
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          architecture: x64
+
+      - name: Install CUDA 12.8 toolkit
+        id: cuda-toolkit
+        uses: Jimver/cuda-toolkit@3d45d157f327c09c04b50ee6ccdea2d9d017ec76 # v0.2.35
+        with:
+          cuda: '12.8.1'
+          method: network
+          sub-packages: '["nvcc", "cudart", "cuobjdump", "nvfatbin", "nvjitlink", "nvrtc", "nvrtc_dev", "thrust", "cublas", "cublas_dev", "cufft", "cufft_dev", "curand", "curand_dev", "cusparse", "cusparse_dev", "visual_studio_integration"]'
+
+      - name: Install build dependencies and cuDNN
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check packaging==24.2
+          python -m pip install --disable-pip-version-check --no-deps nvidia-cudnn-cu12==9.8.0.87
+          $cudnnPath = python -c "import pathlib, sysconfig; print(pathlib.Path(sysconfig.get_paths()['platlib']) / 'nvidia' / 'cudnn')"
+          if (-not (Test-Path (Join-Path $cudnnPath "include\cudnn.h"))) {
+            throw "cuDNN headers were not installed below $cudnnPath"
+          }
+          "CUDNN_PATH=$cudnnPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build ONNX Runtime
+        shell: pwsh
+        run: |
+          python tools\ci_build\build.py `
+            --update `
+            --build `
+            --build_dir build\Windows `
+            --config Release `
+            --cmake_generator "Visual Studio 17 2022" `
+            --skip_submodule_sync `
+            --skip_tests `
+            --parallel 2 `
+            --build_shared_lib `
+            --enable_lto `
+            --use_cuda `
+            --cuda_home "${{ steps.cuda-toolkit.outputs.CUDA_PATH }}" `
+            --cudnn_home "$env:CUDNN_PATH" `
+            --cmake_extra_defines `
+              "CMAKE_CUDA_ARCHITECTURES=61-real;75-real;86-real;89-real;120-real;120-virtual" `
+              "onnxruntime_USE_FPA_INTB_GEMM=OFF"
+
+      - name: Verify CUDA architectures and install
+        shell: pwsh
+        run: |
+          $binaryDir = Join-Path $PWD "build\Windows\Release\Release"
+          $provider = Join-Path $binaryDir "onnxruntime_providers_cuda.dll"
+          $cuobjdump = Join-Path "${{ steps.cuda-toolkit.outputs.CUDA_PATH }}" "bin\cuobjdump.exe"
+          $architectures = & $cuobjdump --list-elf $provider 2>&1 | Out-String
+          $architectures
+          foreach ($expectedSm in @('sm_61', 'sm_75', 'sm_86', 'sm_89', 'sm_120')) {
+            $pattern = '{0}([a-z])?' -f [regex]::Escape($expectedSm)
+            if ($architectures -notmatch $pattern) {
+              throw "onnxruntime_providers_cuda.dll does not contain $expectedSm code"
+            }
+          }
+          $ptxEntries = & $cuobjdump --list-ptx $provider 2>&1 | Out-String
+          $ptxEntries
+          if ($ptxEntries -notmatch 'PTX') {
+            throw "onnxruntime_providers_cuda.dll does not contain compute_120 PTX"
+          }
+          cmake --install build\Windows\Release --config Release --prefix install\Windows
+
+      - name: Create official-layout ZIP
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION_NUMBER -Raw).Trim()
+          python tools\ci_build\github\sm120\package_cuda_release.py `
+            --platform windows `
+            --source-dir . `
+            --install-dir install\Windows `
+            --build-output-dir build\Windows\Release\Release `
+            --output-dir artifacts `
+            --package-name "onnxruntime-win-x64-gpu-$version-sm120" `
+            --commit "${{ github.sha }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onnxruntime-win-x64-gpu-sm120
+          path: artifacts/*
+          if-no-files-found: error
+          compression-level: 0
+
+  linux-x64-cuda128:
+    name: Linux x64 / CUDA 12.8 / SM120
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - name: Free disk space for the CUDA image
+        shell: bash
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Build and package in NVIDIA CUDA container
+        shell: bash
+        run: |
+          docker pull nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
+          docker run --rm \
+            -e "CUDA_ARCHITECTURES=60-real;70-real;75-real;80-real;86-real;90-real;120-real;120-virtual" \
+            -e "EXPECTED_SMS=sm_60 sm_70 sm_75 sm_80 sm_86 sm_90 sm_120" \
+            -e ORT_PARALLEL=2 \
+            -v "${GITHUB_WORKSPACE}:/src" \
+            -v "${RUNNER_TEMP}:/work" \
+            -w /src \
+            nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04 \
+            bash /src/tools/ci_build/github/sm120/build_linux_cuda_package.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onnxruntime-linux-x64-gpu-sm120
+          path: artifacts/*
+          if-no-files-found: error
+          compression-level: 0
+
+  publish-release:
+    name: Publish tagged release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows-x64-cuda128, linux-x64-cuda128]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create release and upload packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          if ! gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release create "${TAG}" --title "ONNX Runtime ${TAG}" --generate-notes
+          fi
+          mapfile -t assets < <(find release-assets -maxdepth 1 -type f -print)
+          test "${#assets[@]}" -gt 0
+          gh release upload "${TAG}" "${assets[@]}" --clobber
